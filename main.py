@@ -2,26 +2,62 @@ import functions_framework
 import os
 import json
 import gspread
+import requests
 from datetime import datetime
 
-# --- CONFIGURATION ---
-# We use environment variables so we don't hardcode secrets
+# Import the new client for Secret Manager
+from google.cloud import secretmanager
+
+# --- CONFIGURATION (Reads from Cloud Run Environment Variables) ---
 SHEET_ID = os.environ.get('SHEET_ID')
-VERIFY_TOKEN = os.environ.get('VERIFY_TOKEN', 'MY_TEST_TOKEN')
+VERIFY_TOKEN = os.environ.get('VERIFY_TOKEN') 
+SECRET_NAME = os.environ.get('SECRET_NAME', 'SHEETS_WRITER_KEY_JSON')
+# GOOGLE_CLOUD_PROJECT is automatically set by Cloud Run
+PROJECT_ID = os.environ.get('GOOGLE_CLOUD_PROJECT') 
+
+# Initialize the Secret Manager client outside the function (for speed)
+# This client object is initialized once when the instance starts
+secret_client = secretmanager.SecretManagerServiceClient()
+
+
+# --- HELPER: RETRIEVE SECRET ---
+def get_secret_value(secret_id):
+    """Fetches the secret value from Secret Manager."""
+    try:
+        # Build the resource name to access the latest version of the secret
+        resource_name = f"projects/{PROJECT_ID}/secrets/{secret_id}/versions/latest"
+        
+        # Access the secret version
+        response = secret_client.access_secret_version(name=resource_name)
+        
+        # Decode and return the JSON string payload
+        return response.payload.data.decode('UTF-8')
+    except Exception as e:
+        print(f"FATAL: Could not access secret {secret_id}. Check IAM permissions. Error: {e}")
+        raise e
 
 
 # --- HELPER: WRITE TO SHEET ---
 def write_to_journal(author, message):
+    """Retrieves key and writes data to the Google Sheet."""
     try:
-        # Authenticate using the uploaded credentials.json
-        gc = gspread.service_account(filename='credentials.json')
+        # 1. Retrieve the JSON key string from Secret Manager
+        credentials_json_string = get_secret_value(SECRET_NAME)
+        
+        # 2. Convert the JSON string into a Python dictionary
+        credentials_dict = json.loads(credentials_json_string) 
+        
+        # 3. Authenticate using the dictionary (keyless authentication)
+        gc = gspread.service_account_from_dict(credentials_dict)
+        
+        # Open the specific Sheet and Worksheet
         sh = gc.open_by_key(SHEET_ID)
-        worksheet = sh.worksheet("Journal")  # Make sure your tab is named "Journal"
-
+        worksheet = sh.worksheet("Journal") 
+        
         now = datetime.now()
         date_str = now.strftime("%Y-%m-%d")
         time_str = now.strftime("%H:%M:%S")
-
+        
         # Append the row
         worksheet.append_row([date_str, time_str, author, message])
         print(f"✅ Saved entry from {author}")
@@ -29,52 +65,51 @@ def write_to_journal(author, message):
     except Exception as e:
         print(f"❌ Error writing to sheet: {e}")
         return False
+        
 
-
-# --- MAIN CLOUD FUNCTION ---
+# --- MAIN CLOUD FUNCTION (Webhook Handler) ---
 @functions_framework.http
 def lenny_webhook(request):
     # 1. SETUP: GET REQUEST (Meta Verification Handshake)
     if request.method == 'GET':
+        # ... (rest of your GET verification logic) ...
         mode = request.args.get('hub.mode')
         token = request.args.get('hub.verify_token')
         challenge = request.args.get('hub.challenge')
-
+        
         if mode and token:
             if mode == 'subscribe' and token == VERIFY_TOKEN:
                 return challenge, 200
             else:
                 return 'Forbidden', 403
-
+    
     # 2. ACTION: POST REQUEST (Incoming Messages)
     if request.method == 'POST':
         data = request.get_json()
-
-        # A. MANUAL TEST TRIGGER (For you to test while waiting for Meta)
-        # We can simulate a message by sending a manual CURL request
-        if "test_message" in data:
-            success = write_to_journal("Test_Dad", data["test_message"])
-            return ("Saved to Sheet", 200) if success else ("Failed", 500)
-
-        # B. REAL WHATSAPP LOGIC
+        
+        # --- (Your WhatsApp/Message Parsing Logic Goes Here) ---
         try:
-            # Navigate the complex WhatsApp JSON structure
-            if 'messages' in data['entry'][0]['changes'][0]['value']:
-                message_data = data['entry'][0]['changes'][0]['value']['messages'][0]
-
-                # Extract simple text
+            # Assuming basic text message extraction (You can expand this later)
+            message_value = data['entry'][0]['changes'][0]['value']
+            if 'messages' in message_value:
+                message_data = message_value['messages'][0]
+                
                 if message_data['type'] == 'text':
                     text_body = message_data['text']['body']
-                    sender = message_data['from']
-
-                    # Map phone number to name (optional)
-                    # You can map this later or just save the phone number
-                    author = "Dad" if "123456" in sender else "Mom"
-
+                    sender = message_data['from'] 
+                    
+                    # NOTE: Update the PARENTS map here or use a dictionary lookup
+                    author = sender 
+                    
                     write_to_journal(author, text_body)
-
-        except (KeyError, IndexError):
-            # Pass on status updates (read receipts, etc.)
-            pass
-
+                    
+        except (KeyError, IndexError, TypeError):
+            # Ignore status updates, read receipts, or non-message events
+            pass 
+            
         return 'OK', 200
+
+# Placeholder for the daily reminder function (requires WhatsApp Template logic)
+# def send_daily_reminder(request):
+#     # ... (Will use the WHATSAPP_TOKEN and send template) ...
+#     pass
