@@ -115,13 +115,17 @@ def lenny_webhook(request):
 #     pass
 
 # --- ADD THIS TO THE END OF main.py ---
+# --- Add this to the very bottom of main.py ---
 if __name__ == "__main__":
-    # Cloud Run provides the PORT environment variable
-    port = int(os.environ.get("PORT", 8080))
-    # This starts the framework and points it to your function
-    from werkzeug.serving import run_simple
+    import os
+    from flask import Flask
     from functions_framework import create_app
+
+    # Cloud Run injects the PORT environment variable (defaulting to 8080)
+    port = int(os.environ.get("PORT", 8080))
     
-    app = create_app("lenny_webhook")
-    # We listen on 0.0.0.0 so Cloud Run can reach the container
-    run_simple("0.0.0.0", port, app)
+    # Create the app using the handler defined in your file
+    app = create_app(target="lenny_webhook")
+    
+    # Listening on 0.0.0.0 is mandatory for Cloud Run
+    app.run(host="0.0.0.0", port=port)
