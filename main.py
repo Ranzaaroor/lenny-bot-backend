@@ -114,18 +114,16 @@ def lenny_webhook(request):
 #     # ... (Will use the WHATSAPP_TOKEN and send template) ...
 #     pass
 
-# --- ADD THIS TO THE END OF main.py ---
-# --- Add this to the very bottom of main.py ---
 if __name__ == "__main__":
     import os
     from flask import Flask
     from functions_framework import create_app
 
-    # Cloud Run injects the PORT environment variable (defaulting to 8080)
+    # Cloud Run injects the PORT environment variable
     port = int(os.environ.get("PORT", 8080))
     
-    # Create the app using the handler defined in your file
+    # Use the app framework to create the server for your handler
     app = create_app(target="lenny_webhook")
     
-    # Listening on 0.0.0.0 is mandatory for Cloud Run
+    # Must listen on 0.0.0.0 for Cloud Run to reach the container
     app.run(host="0.0.0.0", port=port)
