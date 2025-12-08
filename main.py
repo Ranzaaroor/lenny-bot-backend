@@ -113,3 +113,15 @@ def lenny_webhook(request):
 # def send_daily_reminder(request):
 #     # ... (Will use the WHATSAPP_TOKEN and send template) ...
 #     pass
+
+# --- ADD THIS TO THE END OF main.py ---
+if __name__ == "__main__":
+    # Cloud Run provides the PORT environment variable
+    port = int(os.environ.get("PORT", 8080))
+    # This starts the framework and points it to your function
+    from werkzeug.serving import run_simple
+    from functions_framework import create_app
+    
+    app = create_app("lenny_webhook")
+    # We listen on 0.0.0.0 so Cloud Run can reach the container
+    run_simple("0.0.0.0", port, app)
